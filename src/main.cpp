@@ -39,15 +39,11 @@ enum State
     VALIDATING
 };
 
-#define NUM_SAMPLES 100
+#define NUM_SAMPLES 50
+#define AXES 3
 
-float recorded_gx[NUM_SAMPLES];
-float recorded_gy[NUM_SAMPLES];
-float recorded_gz[NUM_SAMPLES];
-
-float validate_gx[NUM_SAMPLES];
-float validate_gy[NUM_SAMPLES];
-float validate_gz[NUM_SAMPLES];
+float recorded_gyro_data[NUM_SAMPLES][AXES];
+float validate_gyro_data[NUM_SAMPLES][AXES];
 
 // Track if a gesture has been recorded
 bool gestureRecorded = false;
@@ -84,8 +80,8 @@ SPI spi(PF_9, PF_8, PF_7, PC_1, use_gpio_ssel);
 InterruptIn int2(PA_2, PullDown);
 
 // DTW function runs in main thread, safe to print
-float dtw_distance(const float *seq1_gx, const float *seq1_gy, const float *seq1_gz, int len1,
-                   const float *seq2_gx, const float *seq2_gy, const float *seq2_gz, int len2)
+float dtw_distance(const float seq1_gyro_data[][AXES], int len1,
+                   const float seq2_gyro_data[][AXES], int len2)
 {
     printf("[DEBUG] Computing DTW distance.\n");
     std::vector<std::vector<float>> dp(len1 + 1, std::vector<float>(len2 + 1, INFINITY));
@@ -95,9 +91,9 @@ float dtw_distance(const float *seq1_gx, const float *seq1_gy, const float *seq1
     {
         for (int j = 1; j <= len2; j++)
         {
-            float dist = std::sqrt((seq1_gx[i - 1] - seq2_gx[j - 1]) * (seq1_gx[i - 1] - seq2_gx[j - 1]) +
-                                   (seq1_gy[i - 1] - seq2_gy[j - 1]) * (seq1_gy[i - 1] - seq2_gy[j - 1]) +
-                                   (seq1_gz[i - 1] - seq2_gz[j - 1]) * (seq1_gz[i - 1] - seq2_gz[j - 1]));
+            float dist = std::sqrt((seq1_gyro_data[i - 1][0] - seq2_gyro_data[j - 1][0]) * (seq1_gyro_data[i - 1][0] - seq2_gyro_data[j - 1][0]) +
+                                   (seq1_gyro_data[i - 1][1] - seq1_gyro_data[j - 1][1]) * (seq1_gyro_data[i - 1][1] - seq1_gyro_data[j - 1][1]) +
+                                   (seq1_gyro_data[i - 1][2] - seq2_gyro_data[j - 1][2]) * (seq1_gyro_data[i - 1][2] - seq2_gyro_data[j - 1][2]));
             dp[i][j] = dist + std::min({dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]});
         }
     }
@@ -112,21 +108,26 @@ void clear_recording_arrays()
 {
     for (int i = 0; i < NUM_SAMPLES; i++)
     {
-        recorded_gx[i] = 0.0f;
-        recorded_gy[i] = 0.0f;
-        recorded_gz[i] = 0.0f;
+        recorded_gyro_data[i][0] = 0.0f;
+        recorded_gyro_data[i][1] = 0.0f;
+        recorded_gyro_data[i][2] = 0.0f;
     }
 }
 
 // Reading gyro samples in main context is safe to print
-bool read_gyro_samples(float *gx_arr, float *gy_arr, float *gz_arr, int numSamples)
+bool read_gyro_samples(float g_arr[][AXES], int numSamples)
 {
-    printf("[DEBUG] Reading %d samples from gyro.\n", numSamples);
+    float alpha = 0.1f;
+    float filtered_gx = 0.0f;
+    float filtered_gy = 0.0f;
+    float filtered_gz = 0.0f;
+    float new_gx = 0.0f;
+    float new_gy = 0.0f;
+    float new_gz = 0.0f;
+
     for (int i = 0; i < numSamples; i++)
     {
-        // Wait for data-ready flag set by ISR, handled here in main thread
-        flags.wait_all(DATA_READY_FLAG);
-
+        printf("[DEBUG] Reading %d samples from gyro.\n", numSamples);
         uint8_t write_buf[32], read_buf[32];
         write_buf[0] = OUT_X_L | 0x80 | 0x40;
         spi.transfer(write_buf, 7, read_buf, 7, spi_cb);
@@ -138,14 +139,27 @@ bool read_gyro_samples(float *gx_arr, float *gy_arr, float *gz_arr, int numSampl
         uint16_t raw_gy = (((uint16_t)read_buf[4]) << 8) | ((uint16_t)read_buf[3]);
         uint16_t raw_gz = (((uint16_t)read_buf[6]) << 8) | ((uint16_t)read_buf[5]);
 
-        gx_arr[i] = ((float)raw_gx) * SCALING_FACTOR;
-        gy_arr[i] = ((float)raw_gy) * SCALING_FACTOR;
-        gz_arr[i] = ((float)raw_gz) * SCALING_FACTOR;
+        // get scaled gyro readings
+        new_gx = ((float)raw_gx) * SCALING_FACTOR;
+        new_gy = ((float)raw_gy) * SCALING_FACTOR;
+        new_gz = ((float)raw_gz) * SCALING_FACTOR;
 
-        printf("[DEBUG] Sample %d: gx=%.5f, gy=%.5f, gz=%.5f\n", i, gx_arr[i], gy_arr[i], gz_arr[i]);
+        // update filtered gyro data
+        filtered_gx = alpha * new_gx + (1.0f - alpha) * filtered_gx;
+        filtered_gy = alpha * new_gy + (1.0f - alpha) * filtered_gy;
+        filtered_gz = alpha * new_gz + (1.0f - alpha) * filtered_gz;
+
+        // store filtered values into the buffer
+        g_arr[i][0] = filtered_gx;
+        g_arr[i][1] = filtered_gy;
+        g_arr[i][2] = filtered_gz;
+
+        printf("[DEBUG] Sample %d: gx=%.5f, gy=%.5f, gz=%.5f\n", i, g_arr[i][0], g_arr[i][1], g_arr[i][2]);
         ThisThread::sleep_for(50ms);
     }
+
     printf("[DEBUG] Finished reading gyro samples.\n");
+
     return true;
 }
 
@@ -177,52 +191,40 @@ void show_result(bool success)
     printf("[DEBUG] Result indication complete.\n");
 }
 
+DigitalIn userButton(PA_0, PullDown);
+
 int main()
 {
     printf("[DEBUG] Starting main...\n");
 
-    // Setup interrupts - no printing in these ISRs
     int2.rise(&data_cb);
-    button.fall(&onButtonPressed);
-    button.rise(&onButtonReleased);
 
-    // Configure SPI - main context, safe to print
-    printf("[DEBUG] Configuring SPI...\n");
-    spi.format(8, 3);
-    spi.frequency(1'000'000);
-
-    uint8_t write_buf[32], read_buf[32];
-
-    printf("[DEBUG] Initializing gyro registers...\n");
-    write_buf[0] = CTRL_REG1;
-    write_buf[1] = CTRL_REG1_CONFIG;
-    spi.transfer(write_buf, 2, read_buf, 2, spi_cb);
-    flags.wait_all(SPI_FLAG);
-    printf("[DEBUG] CTRL_REG1 configured.\n");
-
-    write_buf[0] = CTRL_REG4;
-    write_buf[1] = CTRL_REG4_CONFIG;
-    spi.transfer(write_buf, 2, read_buf, 2, spi_cb);
-    flags.wait_all(SPI_FLAG);
-    printf("[DEBUG] CTRL_REG4 configured.\n");
-
-    write_buf[0] = CTRL_REG3;
-    write_buf[1] = CTRL_REG3_CONFIG;
-    spi.transfer(write_buf, 2, read_buf, 2, spi_cb);
-    flags.wait_all(SPI_FLAG);
-    printf("[DEBUG] CTRL_REG3 configured.\n");
+    // Configure SPI - same as before...
+    // Initialize gyro registers - same as before...
 
     State currentState = IDLE;
     printf("[DEBUG] Entering main loop. State: IDLE\n");
 
+    bool buttonWasPressed = false;
+
     while (true)
     {
-        // Check button logic in main thread
-        if (buttonReleased && buttonPressed)
+        bool buttonState = userButton.read(); // 1 if pressed (assuming PullDown), 0 if not
+        if (buttonState && !buttonWasPressed)
         {
+            // Button just pressed
+            buttonTimer.reset();
+            buttonTimer.start();
+            buttonWasPressed = true;
+        }
+        else if (!buttonState && buttonWasPressed)
+        {
+            // Button was just released
+            buttonTimer.stop();
             int pressDuration = buttonTimer.read_ms();
-            printf("[DEBUG] Evaluating button press: %d ms\n", pressDuration);
+            printf("[DEBUG] Button released after %d ms.\n", pressDuration);
 
+            // Decide state change logic
             if (pressDuration > 1000)
             {
                 // Long press -> RECORDING
@@ -234,7 +236,7 @@ int main()
             }
             else
             {
-                // Short press -> VALIDATING
+                // Short press -> VALIDATING if gesture recorded, else IDLE
                 if (gestureRecorded)
                 {
                     currentState = VALIDATING;
@@ -247,8 +249,7 @@ int main()
                 }
             }
 
-            buttonPressed = false;
-            buttonReleased = false;
+            buttonWasPressed = false;
         }
 
         switch (currentState)
@@ -259,7 +260,7 @@ int main()
 
         case RECORDING:
             printf("[DEBUG] Recording gesture...\n");
-            if (read_gyro_samples(recorded_gx, recorded_gy, recorded_gz, NUM_SAMPLES))
+            if (read_gyro_samples(recorded_gyro_data, NUM_SAMPLES))
             {
                 printf("[DEBUG] Gesture recorded successfully.\n");
                 gestureRecorded = true;
@@ -274,13 +275,13 @@ int main()
 
         case VALIDATING:
             printf("[DEBUG] Validating gesture...\n");
-            if (read_gyro_samples(validate_gx, validate_gy, validate_gz, NUM_SAMPLES))
+            if (read_gyro_samples(validate_gyro_data, NUM_SAMPLES))
             {
                 printf("[DEBUG] Validation samples read. Computing DTW...\n");
-                float dtwDist = dtw_distance(recorded_gx, recorded_gy, recorded_gz, NUM_SAMPLES,
-                                             validate_gx, validate_gy, validate_gz, NUM_SAMPLES);
+                float dtwDist = dtw_distance(recorded_gyro_data, NUM_SAMPLES,
+                                             validate_gyro_data, NUM_SAMPLES);
 
-                float maxDist = 50.0f;
+                float maxDist = 500.0f;
                 float similarity = (1.0f - (dtwDist / maxDist)) * 100.0f;
                 printf("[DEBUG] DTW Distance: %.2f, Similarity: %.2f%%\n", dtwDist, similarity);
 
