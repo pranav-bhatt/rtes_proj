@@ -21,9 +21,9 @@
 
 // ------------------- Gyro Register and Config -------------------
 #define CTRL_REG1 0x20
-#define CTRL_REG1_CONFIG 0b01101111
+#define CTRL_REG1_CONFIG 0b00001111
 #define CTRL_REG4 0x23
-#define CTRL_REG4_CONFIG 0b00010000
+#define CTRL_REG4_CONFIG 0b00000000
 #define CTRL_REG3 0x22
 #define CTRL_REG3_CONFIG 0b00001000
 
@@ -60,7 +60,7 @@ void data_cb()
 }
 
 // Scale factor for converting raw data to angular velocity
-#define SCALING_FACTOR (17.5f * 0.0174532925199432957692236907684886f / 1000.0f)
+#define SCALING_FACTOR (8.75f * 0.0174532925199432957692236907684886f / 1000.0f)
 
 // ------------------- Gesture & State Management -------------------
 enum State
@@ -70,11 +70,37 @@ enum State
     VALIDATING
 };
 
-#define NUM_SAMPLES 50
+// Gyro data artifacts
+#define NUM_SAMPLES 100
 #define AXES 3
+
+struct RollingStats {
+    float mean;
+    float variance;
+    int count;
+
+    RollingStats() : mean(0.0f), variance(0.0f), count(0) {}
+};
+
+RollingStats stats_x, stats_y, stats_z;
+
+// Function to update rolling statistics
+void update_rolling_stats(RollingStats &stats, float new_value) {
+    stats.count++;
+    float delta = new_value - stats.mean;
+    stats.mean += delta / stats.count;
+    stats.variance += delta * (new_value - stats.mean);
+}
+
+// Function to get rolling standard deviation
+float get_rolling_stddev(RollingStats &stats) {
+    return stats.count > 1 ? std::sqrt(stats.variance / (stats.count - 1)) : 1.0f; // Avoid division by zero
+}
 
 float recorded_gyro_data[NUM_SAMPLES][AXES];
 float validate_gyro_data[NUM_SAMPLES][AXES];
+// Calibration variables
+float gyro_bias[AXES] = {0.0f, 0.0f, 0.0f};
 
 // Track if a gesture has been recorded
 bool gestureRecorded = false;
@@ -124,7 +150,7 @@ float dtw_distance(const float seq1_gyro_data[][AXES], int len1,
         for (int j = 1; j <= len2; j++)
         {
             float dist = std::sqrt((seq1_gyro_data[i - 1][0] - seq2_gyro_data[j - 1][0]) * (seq1_gyro_data[i - 1][0] - seq2_gyro_data[j - 1][0]) +
-                                   (seq1_gyro_data[i - 1][1] - seq1_gyro_data[j - 1][1]) * (seq1_gyro_data[i - 1][1] - seq1_gyro_data[j - 1][1]) +
+                                   (seq1_gyro_data[i - 1][1] - seq2_gyro_data[j - 1][1]) * (seq1_gyro_data[i - 1][1] - seq2_gyro_data[j - 1][1]) +
                                    (seq1_gyro_data[i - 1][2] - seq2_gyro_data[j - 1][2]) * (seq1_gyro_data[i - 1][2] - seq2_gyro_data[j - 1][2]));
             dp[i][j] = dist + std::min({dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]});
         }
@@ -146,10 +172,32 @@ void clear_recording_arrays()
     }
 }
 
-// Reading gyro samples in main context is safe to print
+// Function to read raw gyroscope data
+void read_raw_gyro(float *gx, float *gy, float *gz)
+{
+    uint8_t write_buf[32], read_buf[32];
+    write_buf[0] = OUT_X_L | 0x80 | 0x40; // Read command with auto-increment
+    spi.transfer(write_buf, 7, read_buf, 7, spi_cb);
+
+    // Wait for SPI transfer to complete
+    flags.wait_all(SPI_FLAG);
+
+    uint16_t raw_gx = (((uint16_t)read_buf[2]) << 8) | ((uint16_t)read_buf[1]);
+    uint16_t raw_gy = (((uint16_t)read_buf[4]) << 8) | ((uint16_t)read_buf[3]);
+    uint16_t raw_gz = (((uint16_t)read_buf[6]) << 8) | ((uint16_t)read_buf[5]);
+
+    // Convert raw data to angular velocity using scaling factor
+    *gx = ((float)raw_gx) * SCALING_FACTOR;
+    *gy = ((float)raw_gy) * SCALING_FACTOR;
+    *gz = ((float)raw_gz) * SCALING_FACTOR;
+}
+
+// Reading gyro samples in main context with bias removal and alpha filter
 bool read_gyro_samples(float g_arr[][AXES], int numSamples)
 {
-    float alpha = 0.1f;
+    float alphax = 0.9f;
+    float alphay = 0.9f;
+    float alphaz = 0.9f;
     float filtered_gx = 0.0f;
     float filtered_gy = 0.0f;
     float filtered_gz = 0.0f;
@@ -157,37 +205,37 @@ bool read_gyro_samples(float g_arr[][AXES], int numSamples)
     float new_gy = 0.0f;
     float new_gz = 0.0f;
 
+    printf("[DEBUG] Reading %d samples from gyro.\n", numSamples);
     for (int i = 0; i < numSamples; i++)
     {
-        printf("[DEBUG] Reading %d samples from gyro.\n", numSamples);
-        uint8_t write_buf[32], read_buf[32];
-        write_buf[0] = OUT_X_L | 0x80 | 0x40;
-        spi.transfer(write_buf, 7, read_buf, 7, spi_cb);
+        // Read raw gyro data
+        read_raw_gyro(&new_gx, &new_gy, &new_gz);
 
-        // Wait for SPI flag, also in main context
-        flags.wait_all(SPI_FLAG);
+        // Remove bias
+        new_gx -= gyro_bias[0];
+        new_gy -= gyro_bias[1];
+        new_gz -= gyro_bias[2];
 
-        uint16_t raw_gx = (((uint16_t)read_buf[2]) << 8) | ((uint16_t)read_buf[1]);
-        uint16_t raw_gy = (((uint16_t)read_buf[4]) << 8) | ((uint16_t)read_buf[3]);
-        uint16_t raw_gz = (((uint16_t)read_buf[6]) << 8) | ((uint16_t)read_buf[5]);
+        // Initialize filtered values to the first sample
+        if (filtered_gx == 0.0f && filtered_gy == 0.0f && filtered_gz == 0.0f)
+        {
+            filtered_gx = new_gx;
+            filtered_gy = new_gy;
+            filtered_gz = new_gz;
+        }
 
-        // get scaled gyro readings
-        new_gx = ((float)raw_gx) * SCALING_FACTOR;
-        new_gy = ((float)raw_gy) * SCALING_FACTOR;
-        new_gz = ((float)raw_gz) * SCALING_FACTOR;
+        // Update filtered gyro data using the alpha filter
+        filtered_gx = alphax * new_gx + (1.0f - alphax) * filtered_gx;
+        filtered_gy = alphay * new_gy + (1.0f - alphay) * filtered_gy;
+        filtered_gz = alphaz * new_gz + (1.0f - alphaz) * filtered_gz;
 
-        // update filtered gyro data
-        filtered_gx = alpha * new_gx + (1.0f - alpha) * filtered_gx;
-        filtered_gy = alpha * new_gy + (1.0f - alpha) * filtered_gy;
-        filtered_gz = alpha * new_gz + (1.0f - alpha) * filtered_gz;
-
-        // store filtered values into the buffer
+        // Store filtered values into the buffer
         g_arr[i][0] = filtered_gx;
         g_arr[i][1] = filtered_gy;
         g_arr[i][2] = filtered_gz;
 
         printf("[DEBUG] Sample %d: gx=%.5f, gy=%.5f, gz=%.5f\n", i, g_arr[i][0], g_arr[i][1], g_arr[i][2]);
-        ThisThread::sleep_for(50ms);
+        ThisThread::sleep_for(1ms); // Sampling delay
     }
 
     printf("[DEBUG] Finished reading gyro samples.\n");
@@ -227,6 +275,40 @@ void show_result(bool success)
 
 DigitalIn userButton(PA_0, PullDown);
 
+void calibrate_gyroscope()
+{
+    printf("[DEBUG] Calibrating gyroscope. Place on flat surface and press the button.\n");
+
+    while (!userButton.read())
+    {
+        ThisThread::sleep_for(100ms); // Wait for button press
+    }
+
+    printf("[DEBUG] Button pressed. Starting calibration...\n");
+
+    float sum[AXES] = {0.0f, 0.0f, 0.0f};
+    float gx, gy, gz;
+
+    int calib_samples = 300;
+
+    for (int i = 0; i < calib_samples; i++)
+    {
+        read_raw_gyro(&gx, &gy, &gz);
+        sum[0] += gx;
+        sum[1] += gy;
+        sum[2] += gz;
+        ThisThread::sleep_for(10ms);
+    }
+
+    // Calculate bias as the average
+    gyro_bias[0] = sum[0] / calib_samples;
+    gyro_bias[1] = sum[1] / calib_samples;
+    gyro_bias[2] = sum[2] / calib_samples;
+
+    printf("[DEBUG] Calibration complete. Bias X=%.5f, Y=%.5f, Z=%.5f\n",
+           gyro_bias[0], gyro_bias[1], gyro_bias[2]);
+}
+
 int main()
 {
     printf("[DEBUG] Starting main...\n");
@@ -242,6 +324,9 @@ int main()
     printf("[DEBUG] Entering main loop. State: IDLE\n");
 
     bool buttonWasPressed = false;
+
+    // Calibration
+    calibrate_gyroscope();
 
     while (true)
     {
@@ -319,11 +404,10 @@ int main()
                 float dtwDist = dtw_distance(recorded_gyro_data, NUM_SAMPLES,
                                              validate_gyro_data, NUM_SAMPLES);
 
-                float maxDist = 500.0f;
-                float similarity = (1.0f - (dtwDist / maxDist)) * 100.0f;
-                printf("[DEBUG] DTW Distance: %.2f, Similarity: %.2f%%\n", dtwDist, similarity);
+                float threshold = 125.0f;
+                bool success = (dtwDist < threshold);
+                printf("[DEBUG] DTW Distance: %.2f, Success: %d\n", dtwDist, success);
 
-                bool success = (similarity >= 90.0f);
                 show_result(success);
             }
             else
