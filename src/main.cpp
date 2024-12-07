@@ -2,6 +2,22 @@
 #include <cmath>
 #include <vector>
 #include <algorithm>
+#include "stm32f4xx.h"
+#include <string.h>
+
+
+// Define LCD resolution
+#define LCD_WIDTH  240
+#define LCD_HEIGHT 320
+#define LCD_FRAME_BUFFER (0xC0000000)  // Starting address of the framebuffer (depends on your memory map)
+
+// Color definitions
+#define RED   0xF800  // RGB: 1111100000000000
+#define GREEN 0x07E0  // RGB: 0000011111100000
+#define BLUE  0x001F  // RGB: 0000000000011111
+#define WHITE 0xFFFF  // RGB: 1111111111111111
+#define BLACK 0x0000  // RGB: 0000000000000000
+
 
 // ------------------- Gyro Register and Config -------------------
 #define CTRL_REG1 0x20
@@ -16,6 +32,21 @@
 #define OUT_X_L 0x28
 
 EventFlags flags;
+
+// Function to clear the screen with a specific color
+void clear_screen(uint16_t color)
+{
+    uint16_t* framebuffer = (uint16_t*)LCD_FRAME_BUFFER;
+
+    // Fill the framebuffer with the color
+    for (int i = 0; i < LCD_WIDTH * LCD_HEIGHT; i++)
+    {
+        framebuffer[i] = color;
+    }
+
+    // Update the LTDC registers to refresh the screen
+    LTDC->SRCR = LTDC_SRCR_IMR; // Reload shadow registers
+}
 
 // ISR Callbacks: No printing here
 void spi_cb(int event)
@@ -53,6 +84,7 @@ DigitalOut led_green(PD_12);
 DigitalOut led_orange(PD_13);
 DigitalOut led_red(PD_14);
 DigitalOut led_blue(PD_15);
+
 
 // User button on PA_0
 InterruptIn button(PA_0, PullDown);
@@ -174,6 +206,7 @@ void show_result(bool success)
 
     if (success)
     {
+        clear_screen(GREEN);
         for (int i = 0; i < 3; i++)
         {
             led_green = 1;
@@ -184,6 +217,7 @@ void show_result(bool success)
     }
     else
     {
+        clear_screen(RED);
         led_red = 1;
         ThisThread::sleep_for(3s);
         led_red = 0;
@@ -196,6 +230,8 @@ DigitalIn userButton(PA_0, PullDown);
 int main()
 {
     printf("[DEBUG] Starting main...\n");
+
+    clear_screen(BLACK);
 
     int2.rise(&data_cb);
 
@@ -256,10 +292,12 @@ int main()
         {
         case IDLE:
             ThisThread::sleep_for(100ms);
+            clear_screen(BLACK);
             break;
 
         case RECORDING:
             printf("[DEBUG] Recording gesture...\n");
+            clear_screen(BLUE);
             if (read_gyro_samples(recorded_gyro_data, NUM_SAMPLES))
             {
                 printf("[DEBUG] Gesture recorded successfully.\n");
