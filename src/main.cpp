@@ -20,12 +20,18 @@
 
 
 // ------------------- Gyro Register and Config -------------------
+// #define CTRL_REG1 0x20
+// #define CTRL_REG1_CONFIG 0b00001111
+// #define CTRL_REG4 0x23
+// #define CTRL_REG4_CONFIG 0b00000000
+// #define CTRL_REG3 0x22
+// #define CTRL_REG3_CONFIG 0b00001000
 #define CTRL_REG1 0x20
-#define CTRL_REG1_CONFIG 0b00001111
+#define CTRL_REG1_CONFIG 0x6F
 #define CTRL_REG4 0x23
-#define CTRL_REG4_CONFIG 0b00000000
+#define CTRL_REG4_CONFIG 0x00
 #define CTRL_REG3 0x22
-#define CTRL_REG3_CONFIG 0b00001000
+#define CTRL_REG3_CONFIG 0x08
 
 #define SPI_FLAG 1
 #define DATA_READY_FLAG 2
@@ -74,7 +80,7 @@ enum State
 };
 
 // Gyro data artifacts
-#define NUM_SAMPLES 200
+#define NUM_SAMPLES 100
 #define AXES 3
 
 struct RollingStats {
@@ -290,6 +296,7 @@ bool read_gyro_samples(float g_arr[][AXES], int numSamples)
     
     float alphax = 0.9f;
     float alphay = 0.9f;
+    float alphaz = 0.5f;
     float filtered_gx = 0.0f;
     float filtered_gy = 0.0f;
     float new_gx = 0.0f;
@@ -342,7 +349,7 @@ bool read_gyro_samples(float g_arr[][AXES], int numSamples)
     return true;
 }
 
-// show_result runs in main context, safe to print
+// show_result runs in main contextprintf("[DEBUG] Sample %d: gx=%.5f, gy=%.5f, gz=%.5f\n", i, g_arr[i][0], g_arr[i][1], g_arr[i][2]);, safe to print
 void show_result(bool success)
 {
     printf("[DEBUG] Showing result. Success: %d\n", success ? 1 : 0);
@@ -503,7 +510,7 @@ int main()
                 float dtwDist = dtw_distance(recorded_gyro_data, NUM_SAMPLES,
                                              validate_gyro_data, NUM_SAMPLES);
 
-                float threshold = 1500.0f;
+                float threshold = 225.0f;
                 bool success = (dtwDist < threshold);
                 printf("[DEBUG] DTW Distance: %.2f, Success: %d\n", dtwDist, success);
 
