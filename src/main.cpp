@@ -2,6 +2,7 @@
 #include <cmath>
 #include <vector>
 #include <algorithm>
+#include "drivers/LCD_DISCO_F429ZI.h"
 
 // ------------------- Gyro Register and Config -------------------
 #define CTRL_REG1 0x20
@@ -228,13 +229,44 @@ void show_result(bool success)
             ThisThread::sleep_for(300ms);
             led_green = 0;
             ThisThread::sleep_for(300ms);
+
+
+            LCD_DISCO_F429ZI lcd;
+
+            // Clear the screen with a black background
+            lcd.Clear(LCD_COLOR_BLACK);
+
+            // Set text color to red
+            lcd.SetTextColor(LCD_COLOR_BLACK);
+
+            // Set background color to black
+            lcd.SetBackColor(LCD_COLOR_GREEN);
+            
+            // Center-align the string on a specific line
+            lcd.DisplayStringAt(0, LINE(3), (uint8_t *)"IT'S A MATCH!", CENTER_MODE);
         }
     }
+
     else
     {
         led_red = 1;
         ThisThread::sleep_for(3s);
         led_red = 0;
+
+        
+        LCD_DISCO_F429ZI lcd;
+
+        // Clear the screen with a black background
+        lcd.Clear(LCD_COLOR_BLACK);
+
+        // Set text color to red
+        lcd.SetTextColor(LCD_COLOR_BLACK);
+
+        // Set background color to black
+        lcd.SetBackColor(LCD_COLOR_RED);
+            
+        // Center-align the string on a specific line
+        lcd.DisplayStringAt(0, LINE(3), (uint8_t *)"WRONG!", CENTER_MODE);
     }
     printf("[DEBUG] Result indication complete.\n");
 }
@@ -318,6 +350,21 @@ int main()
                 clear_recording_arrays();
                 currentState = RECORDING;
                 printf("[DEBUG] State changed to RECORDING.\n");
+            
+                    
+                LCD_DISCO_F429ZI lcd;
+
+                // Clear the screen with a black background
+                lcd.Clear(LCD_COLOR_BLACK);
+
+                // Set text color to red
+                lcd.SetTextColor(LCD_COLOR_WHITE);
+
+                // Set background color to black
+                lcd.SetBackColor(LCD_COLOR_DARKBLUE);
+                    
+                // Center-align the string on a specific line
+                lcd.DisplayStringAt(0, LINE(3), (uint8_t *)"*RECORDING*", CENTER_MODE);
             }
             else
             {
@@ -326,11 +373,39 @@ int main()
                 {
                     currentState = VALIDATING;
                     printf("[DEBUG] State changed to VALIDATING.\n");
+                    
+                    LCD_DISCO_F429ZI lcd;
+
+                    // Clear the screen with a black background
+                    lcd.Clear(LCD_COLOR_BLACK);
+
+                    // Set text color to red
+                    lcd.SetTextColor(LCD_COLOR_WHITE);
+
+                    // Set background color to black
+                    lcd.SetBackColor(LCD_COLOR_BLACK);
+                    
+                    // Center-align the string on a specific line
+                    lcd.DisplayStringAt(0, LINE(3), (uint8_t *)"VALIDATING", CENTER_MODE);  // add loading bar if functional
                 }
                 else
                 {
                     printf("[DEBUG] No recorded gesture. Staying in IDLE.\n");
                     currentState = IDLE;
+                    
+                    LCD_DISCO_F429ZI lcd;
+
+                    // Clear the screen with a black background
+                    lcd.Clear(LCD_COLOR_BLACK);
+
+                    // Set text color to red
+                    lcd.SetTextColor(LCD_COLOR_WHITE);
+
+                    // Set background color to black
+                    lcd.SetBackColor(LCD_COLOR_BLACK);
+                    
+                    // Center-align the string on a specific line
+                    lcd.DisplayStringAt(0, LINE(3), (uint8_t *)"IDLE", CENTER_MODE);
                 }
             }
 
