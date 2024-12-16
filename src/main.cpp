@@ -3,20 +3,60 @@
 #include <vector>
 #include <algorithm>
 #include "drivers/LCD_DISCO_F429ZI.h"
+#include "stm32f4xx.h"
+#include <string.h>
+
+
+// Define LCD resolution
+#define LCD_WIDTH  240
+#define LCD_HEIGHT 320
+#define LCD_FRAME_BUFFER (0xC0000000)  // Starting address of the framebuffer (depends on your memory map)
+
+// Color definitions
+#define RED   0xF800  // RGB: 1111100000000000
+#define GREEN 0x07E0  // RGB: 0000011111100000
+#define BLUE  0x001F  // RGB: 0000000000011111
+#define WHITE 0xFFFF  // RGB: 1111111111111111
+#define BLACK 0x0000  // RGB: 0000000000000000
+
 
 // ------------------- Gyro Register and Config -------------------
+// #define CTRL_REG1 0x20
+// #define CTRL_REG1_CONFIG 0b00001111
+// #define CTRL_REG4 0x23
+// #define CTRL_REG4_CONFIG 0b00000000
+// #define CTRL_REG3 0x22
+// #define CTRL_REG3_CONFIG 0b00001000
 #define CTRL_REG1 0x20
-#define CTRL_REG1_CONFIG 0b00001111
+#define CTRL_REG1_CONFIG 0x6F
 #define CTRL_REG4 0x23
-#define CTRL_REG4_CONFIG 0b00000000
+#define CTRL_REG4_CONFIG 0x00
 #define CTRL_REG3 0x22
-#define CTRL_REG3_CONFIG 0b00001000
+#define CTRL_REG3_CONFIG 0x08
 
 #define SPI_FLAG 1
 #define DATA_READY_FLAG 2
 #define OUT_X_L 0x28
 
 EventFlags flags;
+
+
+
+// Function to clear the screen with a specific color
+void clear_screen(uint16_t color)
+{
+    uint16_t* framebuffer = (uint16_t*)LCD_FRAME_BUFFER;
+
+    // Fill the framebuffer with the color
+    for (int i = 0; i < LCD_WIDTH * LCD_HEIGHT; i++)
+    {
+        framebuffer[i] = color;
+    }
+
+    // Update the LTDC registers to refresh the screen
+    LTDC->SRCR = LTDC_SRCR_IMR; // Reload shadow registers
+}
+
 
 // ISR Callbacks: No printing here
 void spi_cb(int event)
@@ -80,6 +120,7 @@ DigitalOut led_green(PD_12);
 DigitalOut led_orange(PD_13);
 DigitalOut led_red(PD_14);
 DigitalOut led_blue(PD_15);
+
 
 // User button on PA_0
 InterruptIn button(PA_0, PullDown);
@@ -154,6 +195,7 @@ void read_raw_gyro(float *gx, float *gy, float *gz)
     uint16_t raw_gx = (((uint16_t)read_buf[2]) << 8) | ((uint16_t)read_buf[1]);
     uint16_t raw_gy = (((uint16_t)read_buf[4]) << 8) | ((uint16_t)read_buf[3]);
     uint16_t raw_gz = (((uint16_t)read_buf[6]) << 8) | ((uint16_t)read_buf[5]);
+    
 
     // Convert raw data to angular velocity using scaling factor
     *gx = ((float)raw_gx) * SCALING_FACTOR;
@@ -162,23 +204,117 @@ void read_raw_gyro(float *gx, float *gy, float *gz)
 }
 
 // Reading gyro samples in main context with bias removal and alpha filter
+// bool read_gyro_samples(float g_arr[][AXES], int numSamples)
+// {
+//     float alphax = 0.9f;
+//     float alphay = 0.9f;
+//     float alphaz = 0.9f;
+//     float filtered_gx = 0.0f;
+//     float filtered_gy = 0.0f;
+//     float filtered_gz = 0.0f;
+//     float new_gx = 0.0f;
+//     float new_gy = 0.0f;
+//     float new_gz = 0.0f;
+
+//     printf("[DEBUG] Reading %d samples from gyro.\n", numSamples);
+//     for (int i = 0; i < numSamples; i++)
+//     {
+//         // Read raw gyro data
+//         read_raw_gyro(&new_gx, &new_gy, &new_gz);
+
+//         // Remove bias
+//         new_gx -= gyro_bias[0];
+//         new_gy -= gyro_bias[1];
+//         new_gz -= gyro_bias[2];
+
+//         // Initialize filtered values to the first sample
+//         if (filtered_gx == 0.0f && filtered_gy == 0.0f && filtered_gz == 0.0f)
+//         {
+//             filtered_gx = new_gx;
+//             filtered_gy = new_gy;
+//             filtered_gz = new_gz;
+//         }
+
+//         // Update filtered gyro data using the alpha filter
+//         filtered_gx = alphax * new_gx + (1.0f - alphax) * filtered_gx;
+//         filtered_gy = alphay * new_gy + (1.0f - alphay) * filtered_gy;
+//         filtered_gz = alphaz * new_gz + (1.0f - alphaz) * filtered_gz;
+
+//         // Store filtered values into the buffer
+//         g_arr[i][0] = filtered_gx;
+//         g_arr[i][1] = filtered_gy;
+//         g_arr[i][2] = filtered_gz;
+
+//         // printf("[DEBUG] Sample %d: gx=%.5f, gy=%.5f, gz=%.5f\n", i, g_arr[i][0], g_arr[i][1], g_arr[i][2]);
+//         printf("[DEBUG] Sample %d: gx=%.5f, gy=%.5f, gz=%.5f\n", i, g_arr[i][0], g_arr[i][1], g_arr[i][2]);
+//         ThisThread::sleep_for(1ms); // Sampling delay
+//     }
+
+//     printf("[DEBUG] Finished reading gyro samples.\n");
+
+//     return true;
+// }
+
+class LPFFilter {
+private:
+    float alpha;       // Filter coefficient
+    float prev_output; // Previous filtered output
+
+public:
+    // Constructor
+    // cutoff_freq: Desired cutoff frequency in Hz
+    // sample_rate: Sampling rate in Hz
+    LPFFilter(float cutoff_freq, float sample_rate) {
+        // Calculate alpha for first-order IIR low-pass filter
+        float RC = 1.0f / (2.0f * 3.14159f * cutoff_freq);
+        float dt = 1.0f / sample_rate;
+        alpha = dt / (RC + dt);
+        prev_output = 0.0f;
+    }
+
+    // Default constructor with predefined parameters
+    LPFFilter() : alpha(0.1f), prev_output(0.0f) {}
+
+    // Filter method
+    float update(float input) {
+        // First-order IIR low-pass filter equation
+        // y[n] = α * x[n] + (1-α) * y[n-1]
+        prev_output = alpha * input + (1.0f - alpha) * prev_output;
+        return prev_output;
+    }
+
+    // Reset filter state
+    void reset() {
+        prev_output = 0.0f;
+    }
+};
+
+// Modify read_gyro_samples to use LPF on z-axis
 bool read_gyro_samples(float g_arr[][AXES], int numSamples)
 {
+    // Create LPF for z-axis with 5 Hz cutoff at 1000 Hz sampling rate
+    static LPFFilter z_axis_filter(0.5f, 1000.0f);
+    
     float alphax = 0.9f;
     float alphay = 0.9f;
-    float alphaz = 0.9f;
+    float alphaz = 0.5f;
     float filtered_gx = 0.0f;
     float filtered_gy = 0.0f;
-    float filtered_gz = 0.0f;
     float new_gx = 0.0f;
     float new_gy = 0.0f;
     float new_gz = 0.0f;
 
-    printf("[DEBUG] Reading %d samples from gyro.\n", numSamples);
+    printf("[DEBUG] Reading %d samples from gyro with Z-axis LPF.\n", numSamples);
+    
+    // Reset filter before new sampling sequence
+    z_axis_filter.reset();
+
     for (int i = 0; i < numSamples; i++)
     {
         // Read raw gyro data
         read_raw_gyro(&new_gx, &new_gy, &new_gz);
+
+        printf("%.2f %.2f %.2f\n", new_gx, new_gy, new_gz);
 
         // Remove bias
         new_gx -= gyro_bias[0];
@@ -186,17 +322,18 @@ bool read_gyro_samples(float g_arr[][AXES], int numSamples)
         new_gz -= gyro_bias[2];
 
         // Initialize filtered values to the first sample
-        if (filtered_gx == 0.0f && filtered_gy == 0.0f && filtered_gz == 0.0f)
+        if (filtered_gx == 0.0f && filtered_gy == 0.0f)
         {
             filtered_gx = new_gx;
             filtered_gy = new_gy;
-            filtered_gz = new_gz;
         }
 
-        // Update filtered gyro data using the alpha filter
+        // Update filtered gyro data using the alpha filter for x and y
         filtered_gx = alphax * new_gx + (1.0f - alphax) * filtered_gx;
         filtered_gy = alphay * new_gy + (1.0f - alphay) * filtered_gy;
-        filtered_gz = alphaz * new_gz + (1.0f - alphaz) * filtered_gz;
+
+        // Apply LPF specifically to z-axis
+        float filtered_gz = z_axis_filter.update(new_gz);
 
         // Store filtered values into the buffer
         g_arr[i][0] = filtered_gx;
@@ -204,15 +341,16 @@ bool read_gyro_samples(float g_arr[][AXES], int numSamples)
         g_arr[i][2] = filtered_gz;
 
         printf("[DEBUG] Sample %d: gx=%.5f, gy=%.5f, gz=%.5f\n", i, g_arr[i][0], g_arr[i][1], g_arr[i][2]);
+        
         ThisThread::sleep_for(1ms); // Sampling delay
     }
 
-    printf("[DEBUG] Finished reading gyro samples.\n");
+    printf("[DEBUG] Finished reading gyro samples with Z-axis LPF.\n");
 
     return true;
 }
 
-// show_result runs in main context, safe to print
+// show_result runs in main contextprintf("[DEBUG] Sample %d: gx=%.5f, gy=%.5f, gz=%.5f\n", i, g_arr[i][0], g_arr[i][1], g_arr[i][2]);, safe to print
 void show_result(bool success)
 {
     printf("[DEBUG] Showing result. Success: %d\n", success ? 1 : 0);
@@ -223,6 +361,7 @@ void show_result(bool success)
 
     if (success)
     {
+        clear_screen(GREEN);
         for (int i = 0; i < 3; i++)
         {
             led_green = 1;
@@ -249,6 +388,7 @@ void show_result(bool success)
 
     else
     {
+        clear_screen(RED);
         led_red = 1;
         ThisThread::sleep_for(3s);
         led_red = 0;
@@ -310,6 +450,8 @@ void calibrate_gyroscope()
 int main()
 {
     printf("[DEBUG] Starting main...\n");
+
+    clear_screen(BLACK);
 
     int2.rise(&data_cb);
 
@@ -416,10 +558,12 @@ int main()
         {
         case IDLE:
             ThisThread::sleep_for(100ms);
+            clear_screen(BLACK);
             break;
 
         case RECORDING:
             printf("[DEBUG] Recording gesture...\n");
+            clear_screen(BLUE);
             if (read_gyro_samples(recorded_gyro_data, NUM_SAMPLES))
             {
                 printf("[DEBUG] Gesture recorded successfully.\n");
@@ -441,7 +585,7 @@ int main()
                 float dtwDist = dtw_distance(recorded_gyro_data, NUM_SAMPLES,
                                              validate_gyro_data, NUM_SAMPLES);
 
-                float threshold = 125.0f;
+                float threshold = 225.0f;
                 bool success = (dtwDist < threshold);
                 printf("[DEBUG] DTW Distance: %.2f, Success: %d\n", dtwDist, success);
 
