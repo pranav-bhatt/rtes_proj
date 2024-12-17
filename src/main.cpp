@@ -2,14 +2,9 @@
 #include <cmath>
 #include <vector>
 #include <algorithm>
+#include "drivers/LCD_DISCO_F429ZI.h"
 #include "stm32f4xx.h"
 #include <string.h>
-
-
-// Define LCD resolution
-#define LCD_WIDTH  240
-#define LCD_HEIGHT 320
-#define LCD_FRAME_BUFFER (0xC0000000)  // Starting address of the framebuffer (depends on your memory map)
 
 // Color definitions
 #define RED   0xF800  // RGB: 1111100000000000
@@ -38,23 +33,6 @@
 #define OUT_X_L 0x28
 
 EventFlags flags;
-
-
-
-// Function to clear the screen with a specific color
-void clear_screen(uint16_t color)
-{
-    uint16_t* framebuffer = (uint16_t*)LCD_FRAME_BUFFER;
-
-    // Fill the framebuffer with the color
-    for (int i = 0; i < LCD_WIDTH * LCD_HEIGHT; i++)
-    {
-        framebuffer[i] = color;
-    }
-
-    // Update the LTDC registers to refresh the screen
-    LTDC->SRCR = LTDC_SRCR_IMR; // Reload shadow registers
-}
 
 
 // ISR Callbacks: No printing here
@@ -360,21 +338,50 @@ void show_result(bool success)
 
     if (success)
     {
-        clear_screen(GREEN);
         for (int i = 0; i < 3; i++)
         {
             led_green = 1;
             ThisThread::sleep_for(300ms);
             led_green = 0;
             ThisThread::sleep_for(300ms);
+
+
+            LCD_DISCO_F429ZI lcd;
+
+            // Clear the screen with a black background
+            lcd.Clear(LCD_COLOR_BLACK);
+
+            // Set text color to red
+            lcd.SetTextColor(LCD_COLOR_BLACK);
+
+            // Set background color to black
+            lcd.SetBackColor(LCD_COLOR_GREEN);
+            
+            // Center-align the string on a specific line
+            lcd.DisplayStringAt(0, LINE(3), (uint8_t *)"IT'S A MATCH!", CENTER_MODE);
         }
     }
+
     else
     {
-        clear_screen(RED);
         led_red = 1;
         ThisThread::sleep_for(3s);
         led_red = 0;
+
+        
+        LCD_DISCO_F429ZI lcd;
+
+        // Clear the screen with a black background
+        lcd.Clear(LCD_COLOR_BLACK);
+
+        // Set text color to red
+        lcd.SetTextColor(LCD_COLOR_BLACK);
+
+        // Set background color to black
+        lcd.SetBackColor(LCD_COLOR_RED);
+            
+        // Center-align the string on a specific line
+        lcd.DisplayStringAt(0, LINE(3), (uint8_t *)"WRONG!", CENTER_MODE);
     }
     printf("[DEBUG] Result indication complete.\n");
 }
@@ -418,8 +425,6 @@ void calibrate_gyroscope()
 int main()
 {
     printf("[DEBUG] Starting main...\n");
-
-    clear_screen(BLACK);
 
     int2.rise(&data_cb);
 
@@ -478,17 +483,40 @@ int main()
 
             buttonWasPressed = false;
         }
+                    
+        LCD_DISCO_F429ZI lcd;
+
+        // Clear the screen with a black background
+        lcd.Clear(LCD_COLOR_BLACK);
 
         switch (currentState)
         {
         case IDLE:
             ThisThread::sleep_for(100ms);
-            clear_screen(BLACK);
+
+            // Set text color to red
+            lcd.SetTextColor(LCD_COLOR_WHITE);
+
+            // Set background color to black
+            lcd.SetBackColor(LCD_COLOR_BLACK);
+                    
+            // Center-align the string on a specific line
+            lcd.DisplayStringAt(0, LINE(3), (uint8_t *)"IDLE", CENTER_MODE);
+
             break;
 
         case RECORDING:
             printf("[DEBUG] Recording gesture...\n");
-            clear_screen(BLUE);
+            
+            // Set text color to red
+            lcd.SetTextColor(LCD_COLOR_WHITE);
+
+            // Set background color to black
+            lcd.SetBackColor(LCD_COLOR_DARKBLUE);
+                    
+            // Center-align the string on a specific line
+            lcd.DisplayStringAt(0, LINE(3), (uint8_t *)"*RECORDING*", CENTER_MODE);
+
             if (read_gyro_samples(recorded_gyro_data, NUM_SAMPLES))
             {
                 printf("[DEBUG] Gesture recorded successfully.\n");
@@ -504,6 +532,16 @@ int main()
 
         case VALIDATING:
             printf("[DEBUG] Validating gesture...\n");
+            
+            // Set text color to red
+            lcd.SetTextColor(LCD_COLOR_WHITE);
+
+            // Set background color to black
+            lcd.SetBackColor(LCD_COLOR_BLACK);
+                    
+            // Center-align the string on a specific line
+            lcd.DisplayStringAt(0, LINE(3), (uint8_t *)"VALIDATING", CENTER_MODE);  // add loading bar if functional
+
             if (read_gyro_samples(validate_gyro_data, NUM_SAMPLES))
             {
                 printf("[DEBUG] Validation samples read. Computing DTW...\n");
