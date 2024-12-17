@@ -358,7 +358,8 @@ void show_result(bool success)
         lcd.SetBackColor(LCD_COLOR_GREEN);
 
         // Center-align the string on a specific line
-        lcd.DisplayStringAt(0, LINE(3), (uint8_t *)"IT'S A MATCH! DEVICE UNLOCKED.", CENTER_MODE);
+        lcd.DisplayStringAt(0, LINE(3), (uint8_t *)"IT'S A MATCH!", CENTER_MODE);
+        lcd.DisplayStringAt(0, LINE(4), (uint8_t *)"DEVICE UNLOCKED.", CENTER_MODE);
         ThisThread::sleep_for(3s);
     }
 
@@ -387,12 +388,50 @@ void show_result(bool success)
     printf("[DEBUG] Result indication complete.\n");
 }
 
+void show_calib_prompt(bool completed)
+{
+    printf("[DEBUG] Showing Calibration prompt.");
+    led_green = 0;
+    led_orange = 0;
+    led_red = 0;
+    led_blue = 0;
+
+    led_green = 1;
+    ThisThread::sleep_for(300ms);
+    led_green = 0;
+    ThisThread::sleep_for(300ms);
+
+    LCD_DISCO_F429ZI lcd;
+
+    // Clear the screen with a black background
+    lcd.Clear(LCD_COLOR_BLACK);
+
+    // Set text color to red
+    lcd.SetTextColor(LCD_COLOR_WHITE);
+
+    // Set background color to black
+    lcd.SetBackColor(LCD_COLOR_MAGENTA);
+
+    if (!completed)
+    {
+        lcd.DisplayStringAt(0, LINE(3), (uint8_t *)"PLACE DEVICE ON", CENTER_MODE);
+        lcd.DisplayStringAt(0, LINE(4), (uint8_t *)"FLAT SURFACE AND", CENTER_MODE);
+        lcd.DisplayStringAt(0, LINE(5), (uint8_t *)"PRESS BUTTON", CENTER_MODE);
+        lcd.DisplayStringAt(0, LINE(6), (uint8_t *)"TO CALIBRATE.", CENTER_MODE);
+    }
+    else
+    {
+        lcd.DisplayStringAt(0, LINE(3), (uint8_t *)"CALIBRATION COMPLETE!", CENTER_MODE);
+    }
+    ThisThread::sleep_for(3s);
+}
+
 DigitalIn userButton(PA_0, PullDown);
 
 void calibrate_gyroscope()
 {
     printf("[DEBUG] Calibrating gyroscope. Place on flat surface and press the button.\n");
-
+    show_calib_prompt(false);
     while (!userButton.read())
     {
         ThisThread::sleep_for(100ms); // Wait for button press
@@ -421,6 +460,7 @@ void calibrate_gyroscope()
 
     printf("[DEBUG] Calibration complete. Bias X=%.5f, Y=%.5f, Z=%.5f\n",
            gyro_bias[0], gyro_bias[1], gyro_bias[2]);
+    show_calib_prompt(true);
 }
 
 int main()
