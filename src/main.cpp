@@ -7,12 +7,11 @@
 #include <string.h>
 
 // Color definitions
-#define RED   0xF800  // RGB: 1111100000000000
-#define GREEN 0x07E0  // RGB: 0000011111100000
-#define BLUE  0x001F  // RGB: 0000000000011111
-#define WHITE 0xFFFF  // RGB: 1111111111111111
-#define BLACK 0x0000  // RGB: 0000000000000000
-
+#define RED 0xF800   // RGB: 1111100000000000
+#define GREEN 0x07E0 // RGB: 0000011111100000
+#define BLUE 0x001F  // RGB: 0000000000011111
+#define WHITE 0xFFFF // RGB: 1111111111111111
+#define BLACK 0x0000 // RGB: 0000000000000000
 
 // ------------------- Gyro Register and Config -------------------
 // #define CTRL_REG1 0x20
@@ -33,7 +32,6 @@
 #define OUT_X_L 0x28
 
 EventFlags flags;
-
 
 // ISR Callbacks: No printing here
 void spi_cb(int event)
@@ -61,7 +59,8 @@ enum State
 #define NUM_SAMPLES 100
 #define AXES 3
 
-struct RollingStats {
+struct RollingStats
+{
     float mean;
     float variance;
     int count;
@@ -72,7 +71,8 @@ struct RollingStats {
 RollingStats stats_x, stats_y, stats_z;
 
 // Function to update rolling statistics
-void update_rolling_stats(RollingStats &stats, float new_value) {
+void update_rolling_stats(RollingStats &stats, float new_value)
+{
     stats.count++;
     float delta = new_value - stats.mean;
     stats.mean += delta / stats.count;
@@ -80,7 +80,8 @@ void update_rolling_stats(RollingStats &stats, float new_value) {
 }
 
 // Function to get rolling standard deviation
-float get_rolling_stddev(RollingStats &stats) {
+float get_rolling_stddev(RollingStats &stats)
+{
     return stats.count > 1 ? std::sqrt(stats.variance / (stats.count - 1)) : 1.0f; // Avoid division by zero
 }
 
@@ -97,7 +98,6 @@ DigitalOut led_green(PD_12);
 DigitalOut led_orange(PD_13);
 DigitalOut led_red(PD_14);
 DigitalOut led_blue(PD_15);
-
 
 // User button on PA_0
 InterruptIn button(PA_0, PullDown);
@@ -172,7 +172,6 @@ void read_raw_gyro(float *gx, float *gy, float *gz)
     uint16_t raw_gx = (((uint16_t)read_buf[2]) << 8) | ((uint16_t)read_buf[1]);
     uint16_t raw_gy = (((uint16_t)read_buf[4]) << 8) | ((uint16_t)read_buf[3]);
     uint16_t raw_gz = (((uint16_t)read_buf[6]) << 8) | ((uint16_t)read_buf[5]);
-    
 
     // Convert raw data to angular velocity using scaling factor
     *gx = ((float)raw_gx) * SCALING_FACTOR;
@@ -232,7 +231,8 @@ void read_raw_gyro(float *gx, float *gy, float *gz)
 //     return true;
 // }
 
-class LPFFilter {
+class LPFFilter
+{
 private:
     float alpha;       // Filter coefficient
     float prev_output; // Previous filtered output
@@ -241,7 +241,8 @@ public:
     // Constructor
     // cutoff_freq: Desired cutoff frequency in Hz
     // sample_rate: Sampling rate in Hz
-    LPFFilter(float cutoff_freq, float sample_rate) {
+    LPFFilter(float cutoff_freq, float sample_rate)
+    {
         // Calculate alpha for first-order IIR low-pass filter
         float RC = 1.0f / (2.0f * 3.14159f * cutoff_freq);
         float dt = 1.0f / sample_rate;
@@ -253,7 +254,8 @@ public:
     LPFFilter() : alpha(0.1f), prev_output(0.0f) {}
 
     // Filter method
-    float update(float input) {
+    float update(float input)
+    {
         // First-order IIR low-pass filter equation
         // y[n] = α * x[n] + (1-α) * y[n-1]
         prev_output = alpha * input + (1.0f - alpha) * prev_output;
@@ -261,7 +263,8 @@ public:
     }
 
     // Reset filter state
-    void reset() {
+    void reset()
+    {
         prev_output = 0.0f;
     }
 };
@@ -271,7 +274,7 @@ bool read_gyro_samples(float g_arr[][AXES], int numSamples)
 {
     // Create LPF for z-axis with 5 Hz cutoff at 1000 Hz sampling rate
     static LPFFilter z_axis_filter(0.5f, 1000.0f);
-    
+
     float alphax = 0.9f;
     float alphay = 0.9f;
     float alphaz = 0.5f;
@@ -282,7 +285,7 @@ bool read_gyro_samples(float g_arr[][AXES], int numSamples)
     float new_gz = 0.0f;
 
     printf("[DEBUG] Reading %d samples from gyro with Z-axis LPF.\n", numSamples);
-    
+
     // Reset filter before new sampling sequence
     z_axis_filter.reset();
 
@@ -318,7 +321,7 @@ bool read_gyro_samples(float g_arr[][AXES], int numSamples)
         g_arr[i][2] = filtered_gz;
 
         printf("[DEBUG] Sample %d: gx=%.5f, gy=%.5f, gz=%.5f\n", i, g_arr[i][0], g_arr[i][1], g_arr[i][2]);
-        
+
         ThisThread::sleep_for(1ms); // Sampling delay
     }
 
@@ -338,37 +341,34 @@ void show_result(bool success)
 
     if (success)
     {
-        for (int i = 0; i < 3; i++)
-        {
-            led_green = 1;
-            ThisThread::sleep_for(300ms);
-            led_green = 0;
-            ThisThread::sleep_for(300ms);
+        led_green = 1;
+        ThisThread::sleep_for(300ms);
+        led_green = 0;
+        ThisThread::sleep_for(300ms);
 
+        LCD_DISCO_F429ZI lcd;
 
-            LCD_DISCO_F429ZI lcd;
+        // Clear the screen with a black background
+        lcd.Clear(LCD_COLOR_BLACK);
 
-            // Clear the screen with a black background
-            lcd.Clear(LCD_COLOR_BLACK);
+        // Set text color to red
+        lcd.SetTextColor(LCD_COLOR_BLACK);
 
-            // Set text color to red
-            lcd.SetTextColor(LCD_COLOR_BLACK);
+        // Set background color to black
+        lcd.SetBackColor(LCD_COLOR_GREEN);
 
-            // Set background color to black
-            lcd.SetBackColor(LCD_COLOR_GREEN);
-            
-            // Center-align the string on a specific line
-            lcd.DisplayStringAt(0, LINE(3), (uint8_t *)"IT'S A MATCH!", CENTER_MODE);
-        }
+        // Center-align the string on a specific line
+        lcd.DisplayStringAt(0, LINE(3), (uint8_t *)"IT'S A MATCH! DEVICE UNLOCKED.", CENTER_MODE);
+        ThisThread::sleep_for(3s);
     }
 
     else
     {
         led_red = 1;
-        ThisThread::sleep_for(3s);
+        ThisThread::sleep_for(300ms);
         led_red = 0;
+        ThisThread::sleep_for(300ms);
 
-        
         LCD_DISCO_F429ZI lcd;
 
         // Clear the screen with a black background
@@ -379,9 +379,10 @@ void show_result(bool success)
 
         // Set background color to black
         lcd.SetBackColor(LCD_COLOR_RED);
-            
+
         // Center-align the string on a specific line
         lcd.DisplayStringAt(0, LINE(3), (uint8_t *)"WRONG!", CENTER_MODE);
+        ThisThread::sleep_for(3s);
     }
     printf("[DEBUG] Result indication complete.\n");
 }
@@ -457,7 +458,7 @@ int main()
             printf("[DEBUG] Button released after %d ms.\n", pressDuration);
 
             // Decide state change logic
-            if (pressDuration > 1000)
+            if (pressDuration > 3000)
             {
                 // Long press -> RECORDING
                 printf("[DEBUG] Long press: Prepare to record new gesture.\n");
@@ -483,7 +484,7 @@ int main()
 
             buttonWasPressed = false;
         }
-                    
+
         LCD_DISCO_F429ZI lcd;
 
         // Clear the screen with a black background
@@ -499,7 +500,7 @@ int main()
 
             // Set background color to black
             lcd.SetBackColor(LCD_COLOR_BLACK);
-                    
+
             // Center-align the string on a specific line
             lcd.DisplayStringAt(0, LINE(3), (uint8_t *)"IDLE", CENTER_MODE);
 
@@ -507,13 +508,13 @@ int main()
 
         case RECORDING:
             printf("[DEBUG] Recording gesture...\n");
-            
+
             // Set text color to red
             lcd.SetTextColor(LCD_COLOR_WHITE);
 
             // Set background color to black
             lcd.SetBackColor(LCD_COLOR_DARKBLUE);
-                    
+
             // Center-align the string on a specific line
             lcd.DisplayStringAt(0, LINE(3), (uint8_t *)"*RECORDING*", CENTER_MODE);
 
@@ -532,15 +533,15 @@ int main()
 
         case VALIDATING:
             printf("[DEBUG] Validating gesture...\n");
-            
+
             // Set text color to red
             lcd.SetTextColor(LCD_COLOR_WHITE);
 
             // Set background color to black
             lcd.SetBackColor(LCD_COLOR_BLACK);
-                    
+
             // Center-align the string on a specific line
-            lcd.DisplayStringAt(0, LINE(3), (uint8_t *)"VALIDATING", CENTER_MODE);  // add loading bar if functional
+            lcd.DisplayStringAt(0, LINE(3), (uint8_t *)"VALIDATING", CENTER_MODE); // add loading bar if functional
 
             if (read_gyro_samples(validate_gyro_data, NUM_SAMPLES))
             {
@@ -548,7 +549,7 @@ int main()
                 float dtwDist = dtw_distance(recorded_gyro_data, NUM_SAMPLES,
                                              validate_gyro_data, NUM_SAMPLES);
 
-                float threshold = 225.0f;
+                float threshold = 300.0f;
                 bool success = (dtwDist < threshold);
                 printf("[DEBUG] DTW Distance: %.2f, Success: %d\n", dtwDist, success);
 
